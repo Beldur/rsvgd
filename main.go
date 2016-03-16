@@ -1,58 +1,66 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"math/rand"
-	"net/http"
-	"os"
-	"strconv"
 	"time"
 
 	"github.com/golang/groupcache"
 )
 
 var (
-	gcGroup *groupcache.Group
+	// ServiceStartTime holds the time when service was started
+	ServiceStartTime time.Time
+	// ServiceVersion holds build information
+	ServiceVersion    string
+	dnsPeerLookupName = flag.String("dnsPeerLookupName", "", "DNS SRV Lookup name to find peers.")
+	dnsPeerServer     = flag.String("dnsPeerServer", "", "DNS Server to find peers.")
+	bindAddress       = flag.String("bind", getLocalIP(), "Bind server to given ip address.")
+	port              = flag.Int("port", 8080, "Port to listen on.")
 )
 
+func init() {
+	rand.Seed(time.Now().Unix())
+	ServiceStartTime = time.Now()
+}
+
 func main() {
-	hostname, _ := os.Hostname()
-	groupcachePort := 8081
-	groupcacheHost := fmt.Sprintf("http://%s:%d", hostname, groupcachePort)
+	flag.Parse()
 
-	gcOptions := &groupcache.HTTPPoolOptions{
-		Replicas: 2,
-		BasePath: "/_groupcache/",
+	server := newServer(*bindAddress, *port)
+	server.start()
+
+	if *dnsPeerLookupName != "" && *dnsPeerServer != "" {
+		go startDNSRefreshTicker(server, *dnsPeerLookupName, *dnsPeerServer)
 	}
-	gcPool := groupcache.NewHTTPPoolOpts(groupcacheHost, gcOptions)
-	gcGroup = groupcache.NewGroup("imageCache", 64<<20, groupcache.GetterFunc(imageCacheGetter))
+}
 
-	http.Handle(gcOptions.BasePath, gcPool)
-
-	http.HandleFunc("/render", handleRender)
-	http.ListenAndServe(":8080", nil)
-
-	log.Println(gcPool)
+// startDNSRefreshTicker queries srv records from DNS server and updates the
+// server's groupcache peer list.
+func startDNSRefreshTicker(server *server, dnsPeerLookupName, dnsPeerServer string) {
+	dnsRefreshChan := time.NewTicker(5 * time.Second)
+	go func() {
+		for {
+			select {
+			case <-dnsRefreshChan.C:
+				peerList := getSRVHostListFromDNSServer(dnsPeerLookupName, dnsPeerServer)
+				fmt.Println(peerList)
+				server.SetPeers(peerList)
+			}
+		}
+	}()
 }
 
 func random(min, max int) int {
-	rand.Seed(time.Now().Unix())
 	return rand.Intn(max-min) + min
 }
 
-func imageCacheGetter(context groupcache.Context, key string, dest groupcache.Sink) error {
+func cacheGetter(context groupcache.Context, key string, dest groupcache.Sink) error {
 	log.Println("Calculating...", key)
 
 	dest.SetString("Result")
 
 	return nil
-}
-
-func handleRender(w http.ResponseWriter, r *http.Request) {
-	var buf []byte
-
-	gcGroup.Get(nil, strconv.Itoa(random(0, 10)), groupcache.AllocatingByteSliceSink(&buf))
-
-	log.Println("Got", string(buf))
 }
