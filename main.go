@@ -30,11 +30,12 @@ func main() {
 	flag.Parse()
 
 	server := newServer(*bindAddress, *port)
-	server.start()
 
 	if *dnsPeerLookupName != "" && *dnsPeerServer != "" {
-		go startDNSRefreshTicker(server, *dnsPeerLookupName, *dnsPeerServer)
+		startDNSRefreshTicker(server, *dnsPeerLookupName, *dnsPeerServer)
 	}
+
+	server.start()
 }
 
 // startDNSRefreshTicker queries srv records from DNS server and updates the

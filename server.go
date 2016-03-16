@@ -37,6 +37,7 @@ func newServer(bindAddress string, port int) *server {
 	}
 }
 
+// start starts the HTTP and Groupcaches interface
 func (s *server) start() {
 	go http.ListenAndServe(fmt.Sprintf(":%d", s.gcPort), s.gcPool)
 	http.HandleFunc("/render", s.handleRender)
